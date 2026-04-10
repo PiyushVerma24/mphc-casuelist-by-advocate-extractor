@@ -63,25 +63,27 @@ async def run_scraper(enroll_no: str, enroll_year: str, target_date: str):
             )
 
             stage = "Waiting for and clicking Lawyer tab"
-            lawyer_tab = page.locator("text=Lawyer").first
+            lawyer_tab = page.locator("a:has-text('Lawyer'), text=Lawyer").first
             await lawyer_tab.wait_for(state="visible", timeout=15000)
-            await lawyer_tab.click()
+            await lawyer_tab.click(force=True)
 
             stage = "Waiting for and filling enrollment number"
-            enroll_input = page.locator("input[type='text']:visible").first
+            # Target the specific ID or placeholder
+            enroll_input = page.locator("#lname, input[placeholder*='Lawyer Name'], input[placeholder*='Enrollment']").first
             await enroll_input.wait_for(state="visible", timeout=15000)
-            await enroll_input.fill(f"{enroll_no}/{enroll_year}")
+            await enroll_input.fill(f"{enroll_no}/{enroll_year}", force=True)
 
             stage = "Waiting for and filling date"
-            date_input = page.locator("input[name*='date']:visible, input[type='text']:visible").nth(1)
-            # The .nth(1) locator might not be visible immediately, let's wait a small amount just in case.
+            # Target the datepicker class directly
+            date_input = page.locator("input.datepicker:visible, input[name*='date']:visible").first
+            # Small wait just to ensure UI is ready
             await page.wait_for_timeout(1000)
-            await date_input.fill(target_date)
+            await date_input.fill(target_date, force=True)
 
             stage = "Clicking SHOW button"
-            show_btn = page.locator("button:has-text('SHOW'), input[value='SHOW']").first
+            show_btn = page.locator("button:has-text('SHOW'), input[type='button'][value='SHOW'], input[type='submit'][value='SHOW']").first
             await show_btn.wait_for(state="visible", timeout=15000)
-            await show_btn.click()
+            await show_btn.click(force=True)
 
             stage = "Waiting for results to load"
             # Wait for network idle or a specific timeout
