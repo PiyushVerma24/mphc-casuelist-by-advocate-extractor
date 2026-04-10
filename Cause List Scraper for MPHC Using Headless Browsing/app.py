@@ -50,8 +50,11 @@ async def run_scraper(enroll_no: str, enroll_year: str, target_date: str):
             user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         )
         page = await context.new_page()
+        page.set_default_timeout(60000)
 
+        stage = "Starting"
         try:
+            stage = "Navigating to MPHC cause list page"
             # Navigate to the MPHC cause list page
             await page.goto(
                 "https://mphc.gov.in/causelist",
@@ -59,35 +62,42 @@ async def run_scraper(enroll_no: str, enroll_year: str, target_date: str):
                 timeout=60000,
             )
 
-            # Wait for the page to fully load
-            await page.wait_for_timeout(3000)
-
-            # Click the "Lawyer" tab
+            stage = "Waiting for and clicking Lawyer tab"
             lawyer_tab = page.locator("text=Lawyer").first
+            await lawyer_tab.wait_for(state="visible", timeout=15000)
             await lawyer_tab.click()
-            await page.wait_for_timeout(2000)
 
-            # Fill the enrollment number field
+            stage = "Waiting for and filling enrollment number"
             enroll_input = page.locator("input[type='text']:visible").first
+            await enroll_input.wait_for(state="visible", timeout=15000)
             await enroll_input.fill(f"{enroll_no}/{enroll_year}")
 
-            # Fill the date field
+            stage = "Waiting for and filling date"
             date_input = page.locator("input[name*='date']:visible, input[type='text']:visible").nth(1)
+            # The .nth(1) locator might not be visible immediately, let's wait a small amount just in case.
+            await page.wait_for_timeout(1000)
             await date_input.fill(target_date)
 
-            # Click SHOW button
+            stage = "Clicking SHOW button"
             show_btn = page.locator("button:has-text('SHOW'), input[value='SHOW']").first
+            await show_btn.wait_for(state="visible", timeout=15000)
             await show_btn.click()
 
-            # Wait for results
-            await page.wait_for_timeout(5000)
+            stage = "Waiting for results to load"
+            # Wait for network idle or a specific timeout
+            try:
+                await page.wait_for_load_state("networkidle", timeout=15000)
+            except:
+                pass
+            await page.wait_for_timeout(3000)
 
-            # Extract the page content
+            stage = "Extracting page content"
             content = await page.content()
 
             # Check if results contain the enrollment number
             enrollment_str = f"{enroll_no}/{enroll_year}"
             if enrollment_str in content:
+                stage = "Extracting results table"
                 # Try to extract the results table
                 results_text = await page.inner_text("body")
 
@@ -112,7 +122,7 @@ async def run_scraper(enroll_no: str, enroll_year: str, target_date: str):
         except Exception as e:
             return {
                 "status": "error",
-                "message": str(e),
+                "message": f"Failed at stage: '{stage}'. Error: {str(e)}",
                 "date": target_date,
                 "enrollment": f"{enroll_no}/{enroll_year}",
                 "extracted_at": datetime.now().isoformat(),
