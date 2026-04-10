@@ -1,19 +1,49 @@
-FROM python:3.11-slim
+FROM python:3.11-slim-bookworm
 
 ENV PYTHONUNBUFFERED=1 \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     PORT=8000
 
-# Install system dependencies required by Playwright/Chromium
+# Install ALL Chromium/Playwright dependencies manually
+# (avoids playwright install-deps which fails on newer Debian)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libnss3 libatk1.0-0 libatk-bridge2.0-0 \
-    libcups2 libdrm2 libxkbcommon0 \
-    libxcomposite1 libxdamage1 libxrandr2 \
-    libgbm1 libpango-1.0-0 libcairo2 \
-    libasound2 libxshmfence1 libx11-xcb1 \
-    fonts-liberation fonts-noto-color-emoji \
-    wget ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+    # Core browser dependencies
+    libnss3 \
+    libnspr4 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libxkbcommon0 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxrandr2 \
+    libgbm1 \
+    libpango-1.0-0 \
+    libcairo2 \
+    libasound2 \
+    libxshmfence1 \
+    libx11-xcb1 \
+    libx11-6 \
+    libxcb1 \
+    libxext6 \
+    libxfixes3 \
+    libxi6 \
+    libxrender1 \
+    libxtst6 \
+    libglib2.0-0 \
+    libdbus-1-3 \
+    libatspi2.0-0 \
+    # Fonts (using correct package names for Debian Bookworm)
+    fonts-liberation \
+    fonts-noto-color-emoji \
+    fonts-unifont \
+    fontconfig \
+    # Utilities
+    wget \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && fc-cache -fv
 
 WORKDIR /app
 
@@ -21,9 +51,8 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Playwright Chromium browser
+# Install Playwright Chromium browser ONLY (no install-deps needed)
 RUN playwright install chromium
-RUN playwright install-deps chromium
 
 # Copy application code
 COPY app.py .
