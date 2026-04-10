@@ -63,7 +63,7 @@ async def run_scraper(enroll_no: str, enroll_year: str, target_date: str):
             )
 
             stage = "Waiting for and clicking Lawyer tab"
-            lawyer_tab = page.locator("a:has-text('Lawyer'), text=Lawyer").first
+            lawyer_tab = page.locator("text=Lawyer").first
             await lawyer_tab.wait_for(state="visible", timeout=15000)
             await lawyer_tab.click(force=True)
 
