@@ -55,12 +55,19 @@ async def run_scraper(enroll_no: str, enroll_year: str, target_date: str):
         stage = "Starting"
         try:
             stage = "Navigating to MPHC cause list page"
-            # Navigate to the MPHC cause list page
-            await page.goto(
-                "https://mphc.gov.in/causelist",
-                wait_until="domcontentloaded",
-                timeout=60000,
-            )
+            # Navigate to the MPHC cause list page with a retry mechanism for flaky network resets
+            for attempt in range(3):
+                try:
+                    await page.goto(
+                        "https://mphc.gov.in/causelist",
+                        wait_until="domcontentloaded",
+                        timeout=60000,
+                    )
+                    break
+                except Exception as e:
+                    if attempt == 2:
+                        raise e
+                    await page.wait_for_timeout(3000)
 
             stage = "Waiting for and clicking Lawyer tab"
             lawyer_tab = page.locator("text=Lawyer").first
