@@ -1,7 +1,9 @@
 import asyncio
+import json
 from playwright.async_api import async_playwright
 from datetime import datetime, timedelta
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from typing import Optional
 import os
 
@@ -33,8 +35,15 @@ async def run_scraper(enroll_no: str, enroll_year: str, target_date: str):
     """
     Scrape the MPHC cause list for a given advocate enrollment number.
     Uses the Lawyer tab on https://mphc.gov.in/causelist (no captcha required).
+    Yields string updates so the browser can see progress in real time.
     """
+    async def log_stage(msg: str):
+        return f"[{datetime.now().strftime('%H:%M:%S')}] {msg}\n"
+
+    yield await log_stage(f"Initializing scraper for {enroll_no}/{enroll_year} on {target_date}...")
+
     async with async_playwright() as p:
+        yield await log_stage("Launching headless browser...")
         browser = await p.chromium.launch(
             headless=True,
             args=[
@@ -55,7 +64,7 @@ async def run_scraper(enroll_no: str, enroll_year: str, target_date: str):
         stage = "Starting"
         try:
             stage = "Navigating to MPHC cause list page"
-            # Navigate to the MPHC cause list page with a retry mechanism for flaky network resets
+            yield await log_stage(stage)
             for attempt in range(3):
                 try:
                     await page.goto(
@@ -67,34 +76,35 @@ async def run_scraper(enroll_no: str, enroll_year: str, target_date: str):
                 except Exception as e:
                     if attempt == 2:
                         raise e
+                    yield await log_stage(f"Network error, retrying navigation (attempt {attempt+2}/3)...")
                     await page.wait_for_timeout(3000)
 
             stage = "Waiting for and clicking Lawyer tab"
+            yield await log_stage(stage)
             lawyer_tab = page.locator("text=Lawyer").first
             await lawyer_tab.wait_for(state="visible", timeout=15000)
             await lawyer_tab.click(force=True)
 
             stage = "Waiting for and filling enrollment number"
-            # Target the specific ID or placeholder
+            yield await log_stage(stage)
             enroll_input = page.locator("#lname, input[placeholder*='Lawyer Name'], input[placeholder*='Enrollment']").first
             await enroll_input.wait_for(state="visible", timeout=15000)
             await enroll_input.fill(f"{enroll_no}/{enroll_year}", force=True)
 
             stage = "Waiting for and filling date"
-            # Target the datepicker class directly
+            yield await log_stage(stage)
             date_input = page.locator("input.datepicker:visible, input[name*='date']:visible").first
-            # Small wait just to ensure UI is ready
             await page.wait_for_timeout(1000)
             await date_input.fill(target_date, force=True)
 
             stage = "Clicking SHOW button"
-            # Target the specific SHOW button for the Lawyer tab (#bt12)
+            yield await log_stage(stage)
             show_btn = page.locator("#bt12, input[value='SHOW']:visible").first
             await show_btn.wait_for(state="visible", timeout=15000)
             await show_btn.click(force=True)
 
             stage = "Waiting for results to load"
-            # Wait for network idle or a specific timeout
+            yield await log_stage(stage)
             try:
                 await page.wait_for_load_state("networkidle", timeout=15000)
             except:
@@ -102,41 +112,44 @@ async def run_scraper(enroll_no: str, enroll_year: str, target_date: str):
             await page.wait_for_timeout(3000)
 
             stage = "Extracting page content"
+            yield await log_stage(stage)
             content = await page.content()
 
-            # Check if results contain the enrollment number
             enrollment_str = f"{enroll_no}/{enroll_year}"
             if enrollment_str in content:
                 stage = "Extracting results table"
-                # Try to extract the results table
+                yield await log_stage(stage)
                 results_text = await page.inner_text("body")
 
-                return {
+                yield "\n--- Final Result ---\n"
+                yield json.dumps({
                     "status": "success",
                     "found": True,
                     "date": target_date,
                     "enrollment": enrollment_str,
                     "data": results_text,
                     "extracted_at": datetime.now().isoformat(),
-                }
+                }, indent=2) + "\n"
             else:
-                return {
+                yield "\n--- Final Result ---\n"
+                yield json.dumps({
                     "status": "success",
                     "found": False,
                     "date": target_date,
                     "enrollment": enrollment_str,
                     "message": "No records found for this date",
                     "extracted_at": datetime.now().isoformat(),
-                }
+                }, indent=2) + "\n"
 
         except Exception as e:
-            return {
+            yield "\n--- Final Result ---\n"
+            yield json.dumps({
                 "status": "error",
                 "message": f"Failed at stage: '{stage}'. Error: {str(e)}",
                 "date": target_date,
                 "enrollment": f"{enroll_no}/{enroll_year}",
                 "extracted_at": datetime.now().isoformat(),
-            }
+            }, indent=2) + "\n"
         finally:
             await context.close()
             await browser.close()
@@ -150,27 +163,21 @@ async def extract(
 ):
     """
     Extract cause list for a given advocate enrollment number.
-
-    Parameters:
-    - no: Enrollment number (default: 724)
-    - year: Enrollment year (default: 1984)
-    - date: Target date in DD-MM-YYYY format (default: tomorrow)
+    Now returning a StreamingResponse that yields progress lines in real time.
     """
     if not date:
         # Default to tomorrow's date
         tomorrow = datetime.now() + timedelta(days=1)
         date = tomorrow.strftime("%d-%m-%Y")
 
-    result = await run_scraper(no, year, date)
-
-    if result["status"] == "error":
-        raise HTTPException(status_code=500, detail=result["message"])
-
-    return result
+    # Return a streaming response so the browser sees updates live
+    return StreamingResponse(
+        run_scraper(no, year, date),
+        media_type="text/plain"
+    )
 
 
 if __name__ == "__main__":
     import uvicorn
-
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
