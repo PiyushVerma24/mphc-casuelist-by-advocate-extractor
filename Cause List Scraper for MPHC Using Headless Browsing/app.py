@@ -96,30 +96,45 @@ async def run_scraper(enroll_no: str, enroll_year: str, target_date: str):
             date_input = page.locator("input.datepicker:visible, input[name*='date']:visible").first
             await page.wait_for_timeout(1000)
             await date_input.fill(target_date, force=True)
+            # Dismiss the datepicker popup so it doesn't block UI
+            await page.keyboard.press("Escape")
 
             stage = "Clicking SHOW button"
             yield await log_stage(stage)
-            show_btn = page.locator("#bt12, input[value='SHOW']:visible").first
-            await show_btn.wait_for(state="visible", timeout=15000)
-            await show_btn.click(force=True)
+            # Use JS to invoke the click directly. This bypasses ANY issues with the 
+            # datepicker overlay eating the click event in headless mode. 
+            await page.evaluate("if(document.getElementById('bt12')) document.getElementById('bt12').click(); else get_lw();")
 
             stage = "Waiting for results to load"
             yield await log_stage(stage)
             try:
-                await page.wait_for_load_state("networkidle", timeout=15000)
+                await page.wait_for_load_state("networkidle", timeout=10000)
             except:
                 pass
-            await page.wait_for_timeout(3000)
+            
+            # Wait up to 10 seconds for the results to physically render in the DOM
+            for _ in range(10):
+                content = await page.content()
+                # Checks if either successful load ("Causelist for") or explicit empty ("No records") appeared
+                if "724/1984" in content or "No records" in content or f"{enroll_no}/{enroll_year}" in content:
+                    break
+                await page.wait_for_timeout(1000)
 
             stage = "Extracting page content"
             yield await log_stage(stage)
             content = await page.content()
 
             enrollment_str = f"{enroll_no}/{enroll_year}"
-            if enrollment_str in content:
+            # Check if results logically yielded the enrollment number in the results area
+            if enrollment_str in content and ("Causelist for Lawyer" in content or "table" in content):
                 stage = "Extracting results table"
                 yield await log_stage(stage)
-                results_text = await page.inner_text("body")
+                
+                # Fetch text specifically from the results box if possible, fallback to body
+                try:
+                    results_text = await page.inner_text("#r_box_lw")
+                except:
+                    results_text = await page.inner_text("body")
 
                 yield "\n--- Final Result ---\n"
                 yield json.dumps({
