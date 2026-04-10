@@ -99,6 +99,17 @@ async def run_scraper(enroll_no: str, enroll_year: str, target_date: str):
             # Dismiss the datepicker popup so it doesn't block UI
             await page.keyboard.press("Escape")
 
+            stage = "Selecting 'MOTION' radio button"
+            yield await log_stage(stage)
+            try:
+                # Based on user feedback, ensure the MOTION radio button is explicitly selected.
+                motion_label = page.locator("label:has-text('MOTION'):visible, input[type='radio']:visible:near(label:has-text('MOTION'))").first
+                await motion_label.click(force=True)
+                # also explicitly force check via js just in case
+                await page.evaluate("document.querySelectorAll('input[type=radio]').forEach(r => { if(r.nextElementSibling && r.nextElementSibling.innerText.includes('MOTION')) r.checked = true; })")
+            except Exception as e:
+                pass # Silently proceed if already selected or not found
+
             stage = "Clicking SHOW button"
             yield await log_stage(stage)
             # Use JS to invoke the click directly. This bypasses ANY issues with the 
