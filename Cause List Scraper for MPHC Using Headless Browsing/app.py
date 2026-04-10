@@ -88,7 +88,8 @@ async def run_scraper(enroll_no: str, enroll_year: str, target_date: str):
             await date_input.fill(target_date, force=True)
 
             stage = "Clicking SHOW button"
-            show_btn = page.locator("button:has-text('SHOW'), input[type='button'][value='SHOW'], input[type='submit'][value='SHOW']").first
+            # Target the specific SHOW button for the Lawyer tab (#bt12)
+            show_btn = page.locator("#bt12, input[value='SHOW']:visible").first
             await show_btn.wait_for(state="visible", timeout=15000)
             await show_btn.click(force=True)
 
