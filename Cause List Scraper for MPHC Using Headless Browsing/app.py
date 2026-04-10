@@ -118,30 +118,46 @@ async def run_scraper(enroll_no: str, enroll_year: str, target_date: str):
 
             stage = "Waiting for results to load"
             yield await log_stage(stage)
-            try:
-                await page.wait_for_load_state("networkidle", timeout=10000)
-            except:
-                pass
             
-            # Wait up to 10 seconds for the results to physically render in the DOM
-            for _ in range(10):
-                content = await page.content()
-                # Checks if either successful load ("Causelist for") or explicit empty ("No records") appeared
-                if "724/1984" in content or "No records" in content or f"{enroll_no}/{enroll_year}" in content:
+            # Hook the dialog listener to catch "No record found" or "Please select..." alerts
+            alert_messages = []
+            async def handle_dialog(dialog):
+                alert_messages.append(dialog.message)
+                yield await log_stage(f"Website threw alert: {dialog.message}")
+                await dialog.accept()
+            page.on("dialog", handle_dialog)
+            
+            has_data = False
+            # Wait up to 45 seconds explicitly for the AJAX content container to populate
+            for _ in range(45):
+                if alert_messages:
                     break
+                    
+                try:
+                    r_box_text = await page.locator("#r_box_lw").inner_text(timeout=500)
+                    if r_box_text and len(r_box_text.strip()) > 5:
+                        has_data = True
+                        break
+                except:
+                    pass
                 await page.wait_for_timeout(1000)
 
             stage = "Extracting page content"
             yield await log_stage(stage)
-            content = await page.content()
-
-            enrollment_str = f"{enroll_no}/{enroll_year}"
-            # Check if results logically yielded the enrollment number in the results area
-            if enrollment_str in content and ("Causelist for Lawyer" in content or "table" in content):
+            
+            if alert_messages:
+                yield "\n--- Final Result ---\n"
+                yield json.dumps({
+                    "status": "success",
+                    "found": False,
+                    "date": target_date,
+                    "enrollment": f"{enroll_no}/{enroll_year}",
+                    "message": f"Website Alert: {alert_messages[0]}",
+                    "extracted_at": datetime.now().isoformat(),
+                }, indent=2) + "\n"
+            elif has_data:
                 stage = "Extracting results table"
                 yield await log_stage(stage)
-                
-                # Fetch text specifically from the results box if possible, fallback to body
                 try:
                     results_text = await page.inner_text("#r_box_lw")
                 except:
@@ -152,7 +168,7 @@ async def run_scraper(enroll_no: str, enroll_year: str, target_date: str):
                     "status": "success",
                     "found": True,
                     "date": target_date,
-                    "enrollment": enrollment_str,
+                    "enrollment": f"{enroll_no}/{enroll_year}",
                     "data": results_text,
                     "extracted_at": datetime.now().isoformat(),
                 }, indent=2) + "\n"
@@ -162,8 +178,8 @@ async def run_scraper(enroll_no: str, enroll_year: str, target_date: str):
                     "status": "success",
                     "found": False,
                     "date": target_date,
-                    "enrollment": enrollment_str,
-                    "message": "No records found for this date",
+                    "enrollment": f"{enroll_no}/{enroll_year}",
+                    "message": "Timed out waiting for results. No data rendered and no alert was shown (Could be a slow network or no records).",
                     "extracted_at": datetime.now().isoformat(),
                 }, indent=2) + "\n"
 
